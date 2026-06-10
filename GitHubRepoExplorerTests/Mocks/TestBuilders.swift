@@ -110,7 +110,8 @@ extension GitHubService {
 
 // MARK: - Utilities
 
-/// Minimal thread-safe counter for sequencing responses inside `@Sendable` handlers.
+/// Minimal thread-safe counter for sequencing and counting requests inside
+/// `@Sendable` handlers.
 final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0
@@ -120,5 +121,11 @@ final class Counter: @unchecked Sendable {
         let current = value
         value += 1
         return current
+    }
+
+    /// Number of times `next()` has been called so far.
+    var current: Int {
+        lock.lock(); defer { lock.unlock() }
+        return value
     }
 }
