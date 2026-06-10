@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import os
 
 /// Locally persisted bookmarks.
 ///
@@ -19,6 +20,7 @@ final class BookmarkStore: ObservableObject {
     @Published private(set) var bookmarks: [Repository] = []
 
     private let fileURL: URL
+    private static let logger = Logger(subsystem: "GitHubRepoExplorer", category: "BookmarkStore")
 
     init(fileURL: URL = BookmarkStore.defaultFileURL) {
         self.fileURL = fileURL
@@ -60,8 +62,10 @@ final class BookmarkStore: ObservableObject {
             let data = try JSONEncoder().encode(bookmarks)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            // Persistence failure is non-fatal: bookmarks remain usable in memory.
-            print("BookmarkStore save failed: \(error)")
+            // Persistence failure is non-fatal: bookmarks remain usable in
+            // memory. `.error` level so the failure is persisted by the
+            // unified logging system and visible in Console.app.
+            Self.logger.error("Save failed: \(error, privacy: .public)")
         }
     }
 }
