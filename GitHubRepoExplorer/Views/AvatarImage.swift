@@ -29,16 +29,29 @@ struct AvatarImage: View {
 
     private func load() async {
         guard image == nil, let url else { return }
-        if let cached = AvatarCache.shared.image(for: url) {
+        let requestURL = Self.scaled(url)
+        if let cached = AvatarCache.shared.image(for: requestURL) {
             image = cached
             return
         }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: requestURL)
         request.cachePolicy = .returnCacheDataElseLoad
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let decoded = UIImage(data: data) else { return }
-        AvatarCache.shared.store(decoded, for: url)
+        AvatarCache.shared.store(decoded, for: requestURL)
         image = decoded
+    }
+
+    /// GitHub avatars support server-side scaling via the `s` query parameter.
+    /// 192 px covers the largest display size in the app (64 pt @3x), cutting
+    /// download size and decode memory versus the ~460 px original.
+    /// Internal (not private) so the URL building is unit-testable.
+    static func scaled(_ url: URL, pixelSize: Int = 192) -> URL {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        var items = components?.queryItems ?? []
+        items.append(URLQueryItem(name: "s", value: String(pixelSize)))
+        components?.queryItems = items
+        return components?.url ?? url
     }
 }
 
