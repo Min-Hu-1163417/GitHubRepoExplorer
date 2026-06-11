@@ -1,3 +1,10 @@
+//
+//  DetailCacheTests.swift
+//  GitHubRepoExplorer
+//
+//  Created by Vincent Hu on 11/06/2026.
+//
+
 import Testing
 import Foundation
 @testable import GitHubRepoExplorer

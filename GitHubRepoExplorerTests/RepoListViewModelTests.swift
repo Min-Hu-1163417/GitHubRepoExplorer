@@ -128,6 +128,30 @@ struct RepoListViewModelTests {
         #expect(sections.last?.repositories.map(\.id) == [26])
     }
 
+    @Test("stars grouping sorts rows by star count within a band")
+    func starsGroupingSortsWithinBand() async {
+        // All three land in the 1–10 band, arriving in feed order 3, 9, 6 stars.
+        let low = Repository.stub(id: 1, name: "low")
+        let high = Repository.stub(id: 2, name: "high")
+        let mid = Repository.stub(id: 3, name: "mid")
+        let viewModel = RepoListViewModel(service: .stub(routes: [
+            GitHubService.firstPageURL: .page([low, high, mid]),
+            low.apiURL: .detail(.stub(id: 1, stars: 3)),
+            high.apiURL: .detail(.stub(id: 2, stars: 9)),
+            mid.apiURL: .detail(.stub(id: 3, stars: 6))
+        ]))
+        await viewModel.loadFirstPage()
+        for repository in [low, high, mid] {
+            _ = await viewModel.detail(for: repository)
+        }
+
+        viewModel.grouping = .stars
+
+        let band = viewModel.sections.first
+        #expect(band?.title == StarBand.upTo10.label)
+        #expect(band?.repositories.map(\.id) == [2, 3, 1])
+    }
+
     @Test("detail(for:) fetches via the cache and records the result")
     func detailFetch() async {
         let viewModel = RepoListViewModel(service: .stub(routes: [

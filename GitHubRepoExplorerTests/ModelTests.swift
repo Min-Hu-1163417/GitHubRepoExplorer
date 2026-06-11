@@ -1,3 +1,10 @@
+//
+//  ModelTests.swift
+//  GitHubRepoExplorer
+//
+//  Created by Vincent Hu on 11/06/2026.
+//
+
 import Testing
 @testable import GitHubRepoExplorer
 
