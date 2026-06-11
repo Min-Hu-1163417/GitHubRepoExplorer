@@ -129,3 +129,20 @@ final class Counter: @unchecked Sendable {
         return value
     }
 }
+
+/// Captures the last URLRequest a mock handler received, for asserting on
+/// headers and URLs after the call completes.
+final class RequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: URLRequest?
+
+    func record(_ request: URLRequest) {
+        lock.lock(); defer { lock.unlock() }
+        self.request = request
+    }
+
+    var last: URLRequest? {
+        lock.lock(); defer { lock.unlock() }
+        return request
+    }
+}
