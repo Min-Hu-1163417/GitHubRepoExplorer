@@ -49,4 +49,17 @@ struct BookmarkStoreTests {
         #expect(!third.isBookmarked(repository))
         #expect(third.bookmarks.isEmpty)
     }
+
+    @Test("a corrupted persistence file loads as empty instead of crashing")
+    func corruptedFileLoadsEmpty() throws {
+        let fileURL = temporaryFileURL()
+        try Data("not json".utf8).write(to: fileURL)
+
+        let store = BookmarkStore(fileURL: fileURL)
+
+        #expect(store.bookmarks.isEmpty)
+        // The store must remain fully usable afterwards.
+        store.toggle(Repository.stub())
+        #expect(store.bookmarks.count == 1)
+    }
 }

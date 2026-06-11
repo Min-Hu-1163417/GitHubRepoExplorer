@@ -84,6 +84,37 @@ struct GitHubServiceTests {
         }
     }
 
+    @Test("sends the GitHub media type, API version, and bearer token")
+    func setsRequestHeaders() async throws {
+        let recorder = RequestRecorder()
+        let client = MockHTTPClient { request in
+            recorder.record(request)
+            return (TestFixtures.repositoriesJSON, TestFixtures.response())
+        }
+        let service = GitHubService(client: client, token: "abc123")
+
+        _ = try await service.repositories()
+
+        let request = recorder.last
+        #expect(request?.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
+        #expect(request?.value(forHTTPHeaderField: "X-GitHub-Api-Version") == "2022-11-28")
+        #expect(request?.value(forHTTPHeaderField: "Authorization") == "Bearer abc123")
+    }
+
+    @Test("omits the Authorization header when no token is configured")
+    func omitsAuthorizationWithoutToken() async throws {
+        let recorder = RequestRecorder()
+        let client = MockHTTPClient { request in
+            recorder.record(request)
+            return (TestFixtures.repositoriesJSON, TestFixtures.response())
+        }
+        let service = GitHubService(client: client, token: nil)
+
+        _ = try await service.repositories()
+
+        #expect(recorder.last?.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+
     @Test("decodes a repository detail")
     func decodesDetail() async throws {
         let client = MockHTTPClient { _ in

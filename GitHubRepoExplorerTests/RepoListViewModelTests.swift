@@ -111,6 +111,23 @@ struct RepoListViewModelTests {
         #expect(sections.first?.repositories.map(\.id) == [26])
     }
 
+    @Test("language grouping keeps repos without details in the pending section")
+    func languageGroupingPendingSection() async {
+        // Only `user` has a detail route; `org`'s fetch will fail and stay pending.
+        let viewModel = RepoListViewModel(service: .stub(routes: [
+            GitHubService.firstPageURL: .page([user, org]),
+            user.apiURL: .detail(.stub(id: 1, language: "Ruby", stars: 10))
+        ]))
+        await viewModel.loadFirstPage()
+        _ = await viewModel.detail(for: user)
+
+        viewModel.grouping = .language
+
+        let sections = viewModel.sections
+        #expect(sections.map(\.title) == ["Ruby", RepoListViewModel.pendingSectionTitle])
+        #expect(sections.last?.repositories.map(\.id) == [26])
+    }
+
     @Test("detail(for:) fetches via the cache and records the result")
     func detailFetch() async {
         let viewModel = RepoListViewModel(service: .stub(routes: [
