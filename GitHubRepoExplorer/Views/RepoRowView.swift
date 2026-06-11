@@ -94,9 +94,11 @@ struct BookmarkButton: View {
     }
 }
 
+#if DEBUG
 #Preview {
     List {
         RepoRowView(repository: .preview, detail: .preview)
         RepoRowView(repository: .previewFork, detail: nil)
     }
 }
+#endif

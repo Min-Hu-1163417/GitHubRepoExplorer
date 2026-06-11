@@ -96,6 +96,7 @@ struct RepoPreviewCard: View {
     }
 }
 
+#if DEBUG
 #Preview("With detail") {
     RepoPreviewCard(repository: .preview, detail: .preview)
 }
@@ -103,4 +104,5 @@ struct RepoPreviewCard: View {
 #Preview("Fork, no detail") {
     RepoPreviewCard(repository: .previewFork, detail: nil)
 }
+#endif
 
