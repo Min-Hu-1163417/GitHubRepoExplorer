@@ -106,6 +106,7 @@ struct RepoDetailView: View {
 
 // MARK: - Preview
 
+#if DEBUG
 /// Canned transport so the preview exercises the `\.gitHubService` seam
 /// without touching the network (or the rate limit).
 private struct PreviewHTTPClient: HTTPClient {
@@ -128,3 +129,4 @@ private struct PreviewHTTPClient: HTTPClient {
     .environment(\.gitHubService, GitHubService(client: PreviewHTTPClient(), token: nil))
     .environmentObject(BookmarkStore.preview())
 }
+#endif

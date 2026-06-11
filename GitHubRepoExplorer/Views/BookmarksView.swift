@@ -48,6 +48,7 @@ struct BookmarksView: View {
     }
 }
 
+#if DEBUG
 #Preview("Populated") {
     BookmarksView()
         .environmentObject(BookmarkStore.preview(populated: true))
@@ -57,3 +58,4 @@ struct BookmarksView: View {
     BookmarksView()
         .environmentObject(BookmarkStore.preview())
 }
+#endif
