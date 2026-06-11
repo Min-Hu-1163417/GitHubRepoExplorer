@@ -69,7 +69,9 @@ struct TagView: View {
         .font(.caption2)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(.quaternary, in: Capsule())
+        // Semantic fill rather than the hierarchical `.quaternary`: the
+        // latter renders too heavy on light-mode list cards.
+        .background(Color(.quaternarySystemFill), in: Capsule())
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
