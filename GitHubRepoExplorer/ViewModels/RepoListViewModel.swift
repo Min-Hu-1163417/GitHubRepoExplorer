@@ -209,8 +209,17 @@ final class RepoListViewModel: ObservableObject {
             }
 
         case .stars:
+            // Value-type snapshot so the (implicitly escaping) optional
+            // closure captures the dictionary, not self.
+            let details = details
             return makeSections(order: { a, b in
                 StarBand.displayRank(of: a) < StarBand.displayRank(of: b)
+            }, rowOrder: { a, b in
+                // Within a band, most-starred first; tie-break by id so the
+                // order is deterministic across regroups.
+                let starsA = details[a.id]?.stargazersCount ?? 0
+                let starsB = details[b.id]?.stargazersCount ?? 0
+                return starsA != starsB ? starsA > starsB : a.id < b.id
             }) { repository in
                 guard let detail = details[repository.id] else { return Self.pendingSectionTitle }
                 return StarBand(count: detail.stargazersCount).label
@@ -219,14 +228,20 @@ final class RepoListViewModel: ObservableObject {
     }
 
     /// Groups repositories into titled sections. `order` controls section
-    /// ordering; `nil` means plain alphabetical.
+    /// ordering (`nil` means alphabetical); `rowOrder` optionally sorts rows
+    /// within each section (`nil` keeps feed order).
     private func makeSections(
         order: ((String, String) -> Bool)? = nil,
+        rowOrder: ((Repository, Repository) -> Bool)? = nil,
         key: (Repository) -> String
     ) -> [RepoSection] {
         let grouped = Dictionary(grouping: repositories, by: key)
         let titles = grouped.keys.sorted(by: order ?? { $0 < $1 })
-        return titles.map { RepoSection(title: $0, repositories: grouped[$0] ?? []) }
+        return titles.map { title in
+            var rows = grouped[title] ?? []
+            if let rowOrder { rows.sort(by: rowOrder) }
+            return RepoSection(title: title, repositories: rows)
+        }
     }
 
     // MARK: - Error presentation
