@@ -70,10 +70,13 @@ struct GitHubService: Sendable {
         case 200..<300:
             return
         case 403, 429:
-            let remaining = response.value(forHTTPHeaderField: "X-RateLimit-Remaining")
-            let resetEpoch = response.value(forHTTPHeaderField: "X-RateLimit-Reset")
-                .flatMap(TimeInterval.init)
-            if remaining == "0" || resetEpoch != nil {
+            // Rate limiting is signalled by an exhausted quota, not by the
+            // status code alone: GitHub also returns 403 for per-repository
+            // restrictions (e.g. DMCA-blocked repos), and X-RateLimit-Reset
+            // is present on every response, so neither is evidence by itself.
+            if response.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0" {
+                let resetEpoch = response.value(forHTTPHeaderField: "X-RateLimit-Reset")
+                    .flatMap(TimeInterval.init)
                 throw APIError.rateLimited(resetAt: resetEpoch.map(Date.init(timeIntervalSince1970:)))
             }
             throw APIError.http(statusCode: response.statusCode)

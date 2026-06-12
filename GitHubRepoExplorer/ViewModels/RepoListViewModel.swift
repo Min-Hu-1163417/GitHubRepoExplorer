@@ -67,6 +67,8 @@ final class RepoListViewModel: ObservableObject {
     /// Pull-to-refresh: reload from the first page, keeping the current list
     /// on screen if the refresh fails.
     func refresh() async {
+        self.transientMessage = nil
+        
         do {
             let page = try await service.repositories()
             repositories = page.items
@@ -77,6 +79,12 @@ final class RepoListViewModel: ObservableObject {
                 await loadMissingDetails()
             }
         } catch {
+            guard !Self.isCancellation(error) else {
+                // A cancelled initial load leaves nothing on screen; reset to
+                // .idle so the next appearance triggers a fresh load.
+                if repositories.isEmpty { phase = .idle }
+                return
+            }
             if repositories.isEmpty {
                 phase = .failed(Self.message(for: error))
             } else {
@@ -86,9 +94,11 @@ final class RepoListViewModel: ObservableObject {
     }
 
     /// Infinite scrolling: called when a row appears; fetches the next page
-    /// once the last row is reached, following the Link header cursor.
+    /// once the *visually* last row is reached, following the Link header
+    /// cursor. The anchor must be display order, not feed order: grouping
+    /// reorders rows, so the feed's last item can render anywhere in the list.
     func loadMoreIfNeeded(after repository: Repository) async {
-        guard repository.id == repositories.last?.id,
+        guard repository.id == sections.last?.repositories.last?.id,
               let next = nextURL,
               !isLoadingMore else { return }
 
@@ -100,10 +110,14 @@ final class RepoListViewModel: ObservableObject {
             let existing = Set(repositories.map(\.id))
             repositories.append(contentsOf: page.items.filter { !existing.contains($0.id) })
             nextURL = page.nextURL
+            // A successful load clears any stale error banner (e.g. a rate
+            // limit that has since reset), matching refresh() behaviour.
+            transientMessage = nil
             if grouping.requiresDetails {
                 await loadMissingDetails()
             }
         } catch {
+            guard !Self.isCancellation(error) else { return }
             transientMessage = Self.message(for: error)
         }
     }
@@ -120,7 +134,9 @@ final class RepoListViewModel: ObservableObject {
             details[repository.id] = detail
             return detail
         } catch {
-            transientMessage = Self.message(for: error)
+            if !Self.isCancellation(error) {
+                transientMessage = Self.message(for: error)
+            }
             return nil
         }
     }
@@ -148,6 +164,12 @@ final class RepoListViewModel: ObservableObject {
             }
 
             for await (id, result) in group {
+                // Stop crawling if the user switched to a grouping that no
+                // longer needs details — don't spend quota on a view they left.
+                if !grouping.requiresDetails {
+                    group.cancelAll()
+                    break
+                }
                 switch result {
                 case .success(let detail):
                     details[id] = detail
@@ -248,5 +270,15 @@ final class RepoListViewModel: ObservableObject {
 
     private static func message(for error: Error) -> String {
         (error as? APIError)?.errorDescription ?? error.localizedDescription
+    }
+
+    /// Cancellation means the user navigated away mid-request (a row's `.task`
+    /// was torn down, a screen was popped). It is expected behaviour, not an
+    /// error, and must never surface in the UI.
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if (error as? URLError)?.code == .cancelled { return true }
+        if case APIError.transport(let urlError) = error { return urlError.code == .cancelled }
+        return false
     }
 }
