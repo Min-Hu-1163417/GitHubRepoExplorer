@@ -15,7 +15,9 @@ import Foundation
 @MainActor
 struct RepoListViewModelTests {
 
-    private static let page2URL = URL(string: "https://api.github.com/repositories?since=26")!
+    // nonisolated: referenced from @Sendable mock handlers; immutable and
+    // Sendable, so it needs no actor protection.
+    private nonisolated static let page2URL = URL(string: "https://api.github.com/repositories?since=26")!
 
     private let user = Repository.stub(id: 1)
     private let org = Repository.stub(
@@ -61,12 +63,13 @@ struct RepoListViewModelTests {
         ]))
         await viewModel.loadFirstPage()
 
-        await viewModel.loadMoreIfNeeded(after: viewModel.repositories.last!)
+        // The trigger row is the *visually* last one (last section, last row).
+        await viewModel.loadMoreIfNeeded(after: viewModel.sections.last!.repositories.last!)
 
         #expect(viewModel.repositories.map(\.id) == [1, 26, 27])
     }
 
-    @Test("loadMoreIfNeeded ignores rows that are not the last one")
+    @Test("loadMoreIfNeeded ignores rows that are not the visually last one")
     func pagingOnlyFromLastRow() async {
         let viewModel = RepoListViewModel(service: .stub(routes: [
             GitHubService.firstPageURL: .page([user, org], next: Self.page2URL),
@@ -74,7 +77,8 @@ struct RepoListViewModelTests {
         ]))
         await viewModel.loadFirstPage()
 
-        await viewModel.loadMoreIfNeeded(after: viewModel.repositories.first!)
+        // First row of the first section is mid-list, not the display end.
+        await viewModel.loadMoreIfNeeded(after: viewModel.sections.first!.repositories.first!)
 
         #expect(viewModel.repositories.count == 2)
     }
@@ -150,6 +154,45 @@ struct RepoListViewModelTests {
         let band = viewModel.sections.first
         #expect(band?.title == StarBand.upTo10.label)
         #expect(band?.repositories.map(\.id) == [2, 3, 1])
+    }
+
+    @Test("a successful page load clears a stale error banner")
+    func successfulPageLoadClearsBanner() async {
+        // Request 1: first page OK. Request 2 (refresh): 500 → banner.
+        // Request 3 (next page): OK → banner must clear.
+        let counter = Counter()
+        let page1 = CannedReply.page([user, org], next: Self.page2URL)
+        let page2 = CannedReply.page([.stub(id: 27)])
+        let client = MockHTTPClient { request in
+            let reply: CannedReply = switch counter.next() {
+            case 1: .serverError()
+            default: request.url == Self.page2URL ? page2 : page1
+            }
+            return reply.materialize(url: request.url!)
+        }
+        let viewModel = RepoListViewModel(service: GitHubService(client: client, token: nil))
+
+        await viewModel.loadFirstPage()
+        await viewModel.refresh()
+        #expect(viewModel.transientMessage != nil)
+
+        // Trigger from the visually last row (last section, last row).
+        await viewModel.loadMoreIfNeeded(after: viewModel.sections.last!.repositories.last!)
+
+        #expect(viewModel.transientMessage == nil)
+        #expect(viewModel.repositories.count == 3)
+    }
+
+    @Test("cancellation never surfaces as an error in the UI")
+    func cancellationIsSilent() async {
+        let client = MockHTTPClient { _ in throw URLError(.cancelled) }
+        let viewModel = RepoListViewModel(service: GitHubService(client: client, token: nil))
+
+        await viewModel.loadFirstPage()
+
+        #expect(viewModel.transientMessage == nil)
+        // Reset to .idle so the view's `.task` retries on next appearance.
+        #expect(viewModel.phase == .idle)
     }
 
     @Test("detail(for:) fetches via the cache and records the result")

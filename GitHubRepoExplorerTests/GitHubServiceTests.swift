@@ -50,6 +50,29 @@ struct GitHubServiceTests {
         }
     }
 
+    @Test("403 with quota remaining (e.g. a blocked repository) is not rate limiting")
+    func blockedRepositoryIsNotRateLimit() async {
+        // Real-world case: DMCA-blocked repos return 403 while the quota is
+        // healthy; X-RateLimit-Reset is present on every response.
+        let headers = [
+            "X-RateLimit-Remaining": "3996",
+            "X-RateLimit-Reset": "1750000000"
+        ]
+        let client = MockHTTPClient { _ in
+            (Data(), TestFixtures.response(status: 403, headers: headers))
+        }
+        let service = GitHubService(client: client, token: nil)
+
+        do {
+            _ = try await service.repositories()
+            Issue.record("Expected APIError.http to be thrown")
+        } catch APIError.http(let statusCode) {
+            #expect(statusCode == 403)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test("maps malformed JSON to .decoding")
     func mapsDecodingFailure() async {
         let client = MockHTTPClient { _ in
