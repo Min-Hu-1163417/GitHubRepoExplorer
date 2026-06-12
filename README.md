@@ -1,90 +1,129 @@
 # GitHub Repo Explorer
 
-A fully native iOS app that browses GitHub's public repositories, built with SwiftUI and modern Swift concurrency. No third-party libraries.
+![CI](https://github.com/Min-Hu-1163417/GitHubRepoExplorer/actions/workflows/ci.yml/badge.svg)
 
-## Requirements
+A fully native iOS app that explores GitHub's public repositories. SwiftUI, modern Swift concurrency, zero third-party dependencies.
 
-- Xcode 16+
-- iOS 16.0+ (uses `ObservableObject`, `NavigationStack`)
+## 🚀 Features
 
-Open `GitHubRepoExplorer.xcodeproj`, select a simulator, and run. Tests: ⌘U.
+- **Public Repo Discovery**: Fetches and displays public repositories from `GET /repositories`.
+- **Infinite Scrolling**: Cursor-based pagination following the HTTP `Link` header (`rel="next"`) — page URLs are never guessed.
+- **Grouping**: By Owner Type, Fork Status, Language, or Stargazer bands; rows inside a star band are sorted by star count.
+- **Bookmarks**: Persisted locally as full snapshots — the Bookmarks tab works fully offline. Swipe to remove, long-press any row for a preview card with quick actions.
+- **Graceful Error Handling**: Distinguishes offline, decoding failures, and the three different 403s GitHub can return (see below). Background failures never wipe loaded content.
+- **Loading States**: Initial load, page loads, and per-repository detail fetches each have their own indicator.
+- **Efficient Avatars**: Two-layer image cache (decoded in memory, raw via `URLCache`) and server-side scaling — avatars are requested at display size (`?s=192`, covering 64 pt @3x) instead of the ~460 px originals.
 
-## Features
+## 🛠 Tech Stack
 
-- Fetches public repositories from `https://api.github.com/repositories`
-- **Grouping** by Owner Type, Fork Status, Language, or Stargazer bands (toolbar menu)
-- **Bookmarks** persisted locally as JSON; usable offline from the Bookmarks tab
-- **Pagination / infinite scrolling** driven by the HTTP `Link` header
-- **Graceful error handling** for offline, decoding, and rate-limit (403) failures
-- **Loading states** for initial load, page loads, and per-repo detail fetches
-- Unit tests for the networking layer, Link-header parsing, persistence, and grouping logic
+- **UI**: SwiftUI (`NavigationStack`, value-based navigation), iOS 16+.
+- **Architecture**: MVVM with one-way dependency flow; DI via initialisers, no singletons.
+- **Concurrency**: async/await throughout, `@MainActor` UI state, an `actor` detail cache, bounded `TaskGroup` prefetching.
+- **Networking**: `URLSession` behind a thin `HTTPClient` protocol — the only mock seam.
+- **Persistence**: JSON file in Application Support (injectable file URL for tests).
+- **Testing**: Swift Testing framework; CI on GitHub Actions.
+- **Dependencies**: none.
 
-## Grouping choice
+## 🏗 Architectural Decisions & Assumptions
 
-The default grouping is **Owner Type** (User vs Organization), because that field ships in the list payload and works with zero extra requests. **Fork Status** is also available on the same basis.
+### Layering & modularisation
 
-**Language** and **Stargazer bands** are implemented as bonus groupings. The `/repositories` list endpoint returns a *minimal* repository representation that does **not** include `language` or `stargazers_count`, so these groupings require one extra request per repository (`GET /repos/{owner}/{repo}`). To keep that affordable:
+```mermaid
+graph TD
+    subgraph UI["Views · SwiftUI"]
+        LV["RepoListView"]
+        BV["BookmarksView"]
+        DV["RepoDetailView"]
+    end
 
-- Details are fetched **lazily** — only when a detail-dependent grouping is selected (or a detail screen is opened).
-- Fetches run with **bounded concurrency** (4 at a time) via a `TaskGroup`, so the app never stampedes the API.
-- Results are stored in `DetailCache`, an `actor` that also **coalesces in-flight requests**: concurrent callers asking for the same repository share a single network request.
-- Repositories whose details haven't arrived yet appear under a temporary *"Fetching…"* section and migrate into their real section as data lands.
+    VM["RepoListViewModel<br/>@MainActor · paging, grouping, prefetch"]
+    BS["BookmarkStore<br/>@MainActor · JSON snapshots"]
+    DC["DetailCache<br/>actor · in-flight coalescing"]
+    GS["GitHubService<br/>headers, decoding, error mapping"]
+    HC["HTTPClient<br/>protocol — the mock seam"]
+    US["URLSessionHTTPClient"]
+    MOCK["MockHTTPClient<br/>(test target)"]
+    NET[("api.github.com")]
 
-## Pagination strategy
-
-GitHub paginates `/repositories` with a `since` cursor exposed through the RFC 5988 `Link` response header. Per GitHub's documentation, the app **follows the `rel="next"` URL verbatim and never guesses page numbers or cursors** (`LinkHeaderParser`). The view model stores the parsed next URL; when the last visible row appears (`.task` on the row), the next page is requested, de-duplicated by repository ID, and appended. A footer spinner indicates the in-flight page load, and `nextURL == nil` cleanly ends the scroll.
-
-## Error handling
-
-All failures are mapped into a typed `APIError` with user-presentable messages:
-
-| Failure | Detection | Presentation |
-|---|---|---|
-| Offline / timeout | `URLError` → `.transport` | Full-screen retry view (initial load) or inline banner (later) |
-| Decoding | `JSONDecoder` throw → `.decoding` | Same as above |
-| Rate limit | HTTP 403/429 **and** `X-RateLimit-Remaining: 0` → `.rateLimited(resetAt:)`, reset time parsed from `X-RateLimit-Reset` | Message includes the local reset time |
-| Other HTTP | non-2xx → `.http(statusCode:)` | Generic message with the code |
-
-A deliberate design decision: only the *initial* load failure replaces the screen with a retry state. Failures on subsequent pages or background detail fetches surface as a **dismissible inline banner** so the content the user already has never disappears. When the rate limit is hit during detail prefetching, the task group cancels remaining work immediately instead of burning more quota.
-
-> Tip: the unauthenticated rate limit is 60 requests/hour. You can optionally set a `GITHUB_TOKEN` environment variable in the scheme to authenticate requests (5,000 req/h) while developing. The app works without it.
-
-## Architecture & folder structure
-
-MVVM with a protocol-abstracted networking layer and unidirectional state in an `ObservableObject`, `@MainActor` view model. User-facing copy lives at its point of use (`Text` literals and `String(localized:)`), so it flows through Xcode's String Catalog and stays ready for localization; protocol constants (API headers, URLs) stay in the types that own them rather than a global constants file.
-
-```
-GitHubRepoExplorer/
-├── App/            Entry point + tab root
-├── Models/         Repository, RepoDetail, grouping types
-├── Networking/     HTTPClient protocol, GitHubService, LinkHeaderParser, APIError
-├── Caching/        DetailCache (actor, request coalescing)
-├── Persistence/    BookmarkStore (JSON file in Application Support)
-├── ViewModels/     RepoListViewModel (paging, grouping, prefetching)
-└── Views/          List, row, detail, bookmarks, loading/error/banner views
-GitHubRepoExplorerTests/
-├── Mocks/          MockHTTPClient + fixtures
-└── …Tests.swift    Networking, Link header, persistence, grouping tests
+    LV --> VM
+    LV --> BS
+    BV --> BS
+    DV --> GS
+    VM --> GS
+    VM --> DC
+    DC --> GS
+    GS --> HC
+    US -. conforms .-> HC
+    MOCK -. conforms .-> HC
+    US --> NET
 ```
 
-Concurrency notes: all networking is `async/await`; UI state is `@MainActor`-isolated; the detail cache is an `actor`; prefetching uses a `withTaskGroup` with bounded width and cooperative cancellation.
+Dependencies flow one way, with plain value `Models` shared underneath. `Networking`, `Models`, and `Caching` import no UI frameworks, so lifting them into a local Swift package (e.g. `GitHubAPIKit`) is a mechanical move; a feature-module split rides the same seams. Physical splitting is deliberately deferred — at this size it would add build overhead without payoff.
 
-### Modularisation & scalability
+### Grouping choice
+**Owner Type** is the default because the field ships in the list payload — zero extra requests. **Language** and **Stargazer bands** need data the list endpoint omits, which leads to:
 
-The app is modular at the logical level and deliberately monolithic at the physical level. Dependencies flow one way — Views → ViewModel → Service / Cache / Persistence → `HTTPClient` — with plain value `Models` shared underneath; there are no singletons, and every dependency is injected through initialisers with production defaults. `Networking`, `Models`, and `Caching` import no UI frameworks, so lifting them into a local Swift package (e.g. `GitHubAPIKit`) would be a mechanical move, and at multi-feature scale the same seams support a feature-module split (repo browsing, bookmarks) over a shared kernel. Splitting packages now would add build and maintenance overhead without payoff at this size, so it's documented as the growth path rather than done pre-emptively.
+### Data enrichment
+`/repositories` returns a minimal representation (no `language`, no `stargazers_count`); both fields come from **one** extra request per repository (`GET /repos/{owner}/{repo}`). To keep that affordable against the rate limit:
 
-## Testing approach
+- **Lazy**: details are fetched only when a detail-dependent grouping is selected or a detail screen opens.
+- **Bounded**: prefetching runs 4-wide through a `TaskGroup` sliding window — never a stampede.
+- **Coalesced & cached**: `DetailCache` is an actor with in-flight coalescing; concurrent callers for the same repository share a single request, and a cached detail serves both Language and Stars grouping.
+- **Interruptible**: the crawl stops as soon as the user leaves a detail-dependent grouping, and cancels remaining work immediately when the rate limit is hit.
+- Repositories whose details haven't arrived sit in a temporary *"Fetching…"* section and migrate into their real section as data lands.
 
-Tests use the Swift Testing framework and focus on the logic most likely to break:
+### Pagination
+The app follows the `rel="next"` URL from the `Link` header verbatim (`LinkHeaderParser`) — the `since` cursor is owned by the server. The infinite-scroll trigger is anchored to the **visually** last row (last section, last row), not the feed-order last item: grouping reorders rows, so the feed's last item can render anywhere in the list.
+
+### Error handling strategy
+All failures map into a typed `APIError` with user-presentable messages.
+
+- **Terminal**: only the *initial* load failure replaces the screen with a retry state.
+- **Transient**: later failures (paging, enrichment) surface as a dismissible banner; loaded content never disappears. The banner self-clears on the next successful load.
+- **Cancellation is not an error**: a row's `.task` tearing down mid-request (fast scrolling, popping a screen) stays silent.
+- **The three 403s**: GitHub uses 403 for primary quota exhaustion, secondary (burst) throttling, *and* per-repository restrictions such as DMCA-blocked repos — the oldest pages of `/repositories` contain a few. Rate limiting is classified **only** by `X-RateLimit-Remaining: 0` (the reset header is present on every response, so it proves nothing); a blocked repository surfaces as a plain HTTP error and never aborts the rest of the prefetch batch.
+
+### Bookmarks are deliberately not refreshable
+Bookmarks store full repository snapshots and have no pull-to-refresh: they exist to work offline, and re-fetching *n* bookmarks would cost *n* requests against a 60 req/h unauthenticated limit. Slightly stale snapshots are an acceptable trade for that.
+
+### Observability
+A transport-level `os.Logger` (`subsystem: GitHubRepoExplorer, category: HTTP`) records status, path, and quota headers per request at `.debug` — in-memory only, never persisted. It is what made the 403 taxonomy above diagnosable.
+
+## 🧪 Testing Consideration
+
+Unit tests target the logic most likely to break; only the transport is mocked, so view-model tests exercise real decoding, Link parsing, and error mapping end-to-end:
 
 - **`LinkHeaderParserTests`** — real GitHub header shapes, unquoted `rel`, last page, missing header.
-- **`GitHubServiceTests`** — decoding a page + next cursor, 403 rate-limit mapping (including the reset date), decoding failures, 5xx mapping. Networking is injected via the `HTTPClient` protocol, so no requests are made.
-- **`BookmarkStoreTests`** — toggle semantics and persistence across instances, using a temp-file URL injected into the store.
-- **`GroupingTests`** — star-band boundary values (parameterised test) and section ordering.
-- **`RepoListViewModelTests`** — the view model driven end-to-end against canned HTTP replies (only the transport is mocked, so real decoding, Link parsing, and error mapping are exercised): initial load, paging with de-duplication, rate-limit banner behaviour, section building, and detail recording. Model stubs and a URL-routing mock (`TestBuilders.swift`) keep these tests free of handwritten JSON.
+- **`GitHubServiceTests`** — page + cursor decoding, request headers (media type, API version, bearer token presence *and* absence), rate-limit vs blocked-repo 403 classification, decoding and 5xx mapping.
+- **`RepoListViewModelTests`** — initial load, paging with de-duplication, display-order trigger anchoring, silent cancellation, banner lifecycle, section building, within-band star sorting.
+- **`DetailCacheTests`** — ten concurrent callers produce exactly one request; failures are never cached.
+- **`BookmarkStoreTests`** — toggle semantics, persistence across instances (including removal), corrupted-file resilience.
+- **`GroupingTests` / `ModelTests` / `AvatarScalingTests`** — star-band boundaries, section ordering, model helpers, avatar URL building.
 
-## Trade-offs / next steps
+Model stubs and a URL-routing mock (`TestBuilders`) keep tests free of handwritten JSON — except in `GitHubServiceTests`, which keeps real wire-format fixtures on purpose to cover field mapping.
 
-- Detail cache is in-memory only; persisting it (e.g. `URLCache` or a small disk store) would survive relaunches and save rate limit.
-- The `/repositories` feed starts from the oldest public repos (GitHub's `since=0` cursor) — that's inherent to the assigned endpoint.
-- With more time: snapshot tests for rows, a `URLProtocol`-based integration test, and offline caching of list pages.
+Every major view also has **Xcode previews** (backed by DEBUG-only sample data in `PreviewData`), including empty/error states that are awkward to reach by hand; `RepoDetailView`'s preview injects a canned client through the same environment seam production uses.
+
+## 🔁 CI & Workflow
+
+- **GitHub Actions** builds and runs the full test suite on every push to `main` and every pull request (simulator is selected dynamically, so runner image updates don't break the job).
+- **Branch protection**: `main` only accepts pull requests, and the test check must be green before merging.
+- Development followed the same flow — each fix landed as a PR with its own tests (the commit history doubles as a changelog).
+
+## 🔧 Setup
+
+1. Clone, open `GitHubRepoExplorer.xcodeproj` (Xcode 16+), run. Tests: ⌘U. No configuration required.
+2. *(Optional)* Raise the API rate limit from 60 to 5,000 req/h while developing:
+   - Create a [fine-grained token](https://github.com/settings/personal-access-tokens) — defaults are right: public repos read-only, no permissions.
+   - Duplicate the scheme (leave **Shared unchecked**) and add `GITHUB_TOKEN` to its environment variables.
+   - Unshared schemes live in gitignored `xcuserdata/`, so the token structurally cannot be committed. The shared scheme ships clean; CI needs no token because tests never touch the network.
+
+## 🚀 Future Improvements
+
+- **Persist the detail cache**: it's in-memory by design; an on-disk layer reusing GitHub's ETag/304 flow (304s don't count against quota) would survive relaunches.
+- **Viewport-prioritised enrichment**: prefetching is currently exhaustive for grouping completeness; at larger scales it should prioritise rows near the viewport.
+- **Snapshot tests** for rows and state views; a `URLProtocol`-based integration test.
+- **iOS 17 migration**: swap `ObservableObject` for `@Observable` (finer-grained invalidation) and the environment-key boilerplate for `@Entry`.
+
+---
+**Author**: Vincent Hu
