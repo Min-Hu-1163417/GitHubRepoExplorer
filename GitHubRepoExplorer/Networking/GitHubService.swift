@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import os
 
 /// One page of results plus the cursor (full URL) for the next page, if any.
 struct Page<Item: Sendable>: Sendable {
@@ -16,6 +17,8 @@ struct Page<Item: Sendable>: Sendable {
 /// Stateless GitHub REST client. All requests go through the injected
 /// `HTTPClient`, which keeps this type fully unit-testable without networking.
 struct GitHubService: Sendable {
+    private static let logger = Logger(subsystem: "GitHubRepoExplorer", category: "GitHubService")
+
     /// Safe to unwrap: compile-time literal, and a typo should crash at
     /// startup rather than surface later. Runtime URLs (Link header) stay optional.
     static let firstPageURL = URL(string: "https://api.github.com/repositories")!
@@ -89,6 +92,10 @@ struct GitHubService: Sendable {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
+            // The one failure the transport log can't see: the HTTP line says
+            // 200, but the payload didn't match our model — usually a sign
+            // the API changed shape. The DecodingError detail lives only here.
+            Self.logger.error("Decoding \(T.self) failed: \(error, privacy: .public)")
             throw APIError.decoding(error)
         }
     }
